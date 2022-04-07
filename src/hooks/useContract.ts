@@ -63,6 +63,9 @@ import { getContract, getProviderOrSigner } from '../utils'
 
 import { IPancakePair } from '../config/abi/types/IPancakePair'
 
+import useIsAmbireWC from './useIsAmbireWC'
+import AMBIRE_WALLET_ABI from '../config/abi/ambire-wallet.json'
+
 /**
  * Helper hooks to get specific contracts (by ABI)
  */
@@ -145,6 +148,12 @@ export const usePointCenterIfoContract = () => {
 export const useBunnySpecialContract = () => {
   const { library } = useActiveWeb3React()
   return useMemo(() => getBunnySpecialContract(library.getSigner()), [library])
+}
+
+export function useAmbireWalletContract(): Contract | null {
+  const { account } = useActiveWeb3React()
+  const isAmbireWC = useIsAmbireWC()
+  return useContract(isAmbireWC ? account ?? undefined : undefined, AMBIRE_WALLET_ABI, true)
 }
 
 export const useClaimRefundContract = () => {

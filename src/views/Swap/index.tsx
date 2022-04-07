@@ -42,6 +42,7 @@ import ConnectWalletButton from '../../components/ConnectWalletButton'
 import useActiveWeb3React from '../../hooks/useActiveWeb3React'
 import { useCurrency, useAllTokens } from '../../hooks/Tokens'
 import { ApprovalState, useApproveCallbackFromTrade } from '../../hooks/useApproveCallback'
+import useIsAmbireWC from '../../hooks/useIsAmbireWC'
 import { useSwapCallback } from '../../hooks/useSwapCallback'
 import useWrapCallback, { WrapType } from '../../hooks/useWrapCallback'
 import { Field } from '../../state/swap/actions'
@@ -269,9 +270,11 @@ export default function Swap() {
   // warnings on slippage
   const priceImpactSeverity = warningSeverity(priceImpactWithoutFee)
 
+  const isAmbireWC = useIsAmbireWC()
   // show approve flow when: no error on inputs, not approved or pending, or approved in current session
   // never show if price impact is above threshold in non expert mode
   const showApproveFlow =
+    !isAmbireWC &&
     !swapInputError &&
     (approval === ApprovalState.NOT_APPROVED ||
       approval === ApprovalState.PENDING ||

@@ -1,6 +1,9 @@
 import { BigNumber } from '@ethersproject/bignumber'
 import { Contract } from '@ethersproject/contracts'
-import { SwapParameters, Trade } from '@pancakeswap/sdk'
+import { TransactionResponse } from '@ethersproject/providers'
+import WalletConnectProvider from '@walletconnect/web3-provider'
+import { MaxUint256 } from '@ethersproject/constants'
+import { ETHER, SwapParameters, Token, Trade } from '@pancakeswap/sdk'
 import { TranslateFunction, useTranslation } from 'contexts/Localization'
 import useActiveWeb3React from 'hooks/useActiveWeb3React'
 import { useMemo } from 'react'
@@ -10,8 +13,11 @@ import { INITIAL_ALLOWED_SLIPPAGE } from '../config/constants'
 import { useTransactionAdder } from '../state/transactions/hooks'
 import { calculateGasMargin, isAddress } from '../utils'
 import isZero from '../utils/isZero'
+import { useTokenContract } from './useContract'
+import { ApprovalState, useApproveCallbackFromTrade } from './useApproveCallback'
 import useENS from './ENS/useENS'
 import { useSwapCallArguments } from './useSwapCallArguments'
+import useIsAmbireWC from './useIsAmbireWC'
 
 export enum SwapCallbackState {
   INVALID,
@@ -54,6 +60,14 @@ export function useSwapCallback(
 
   const { address: recipientAddress } = useENS(recipientAddressOrName)
   const recipient = recipientAddressOrName === null ? account : recipientAddress
+
+  const isAmbireWC = useIsAmbireWC()
+
+  const tokenAddress =
+    trade?.inputAmount.currency === ETHER ? undefined : (trade?.inputAmount.currency as Token)?.address
+  const tokenContract = useTokenContract(tokenAddress)
+
+  const [approvalState] = useApproveCallbackFromTrade(trade, allowedSlippage)
 
   return useMemo(() => {
     if (!trade || !library || !account || !chainId) {
@@ -121,11 +135,52 @@ export function useSwapCallback(
           gasEstimate,
         } = successfulEstimation
 
-        return contract[methodName](...args, {
-          gasLimit: calculateGasMargin(gasEstimate),
-          gasPrice,
-          ...(value && !isZero(value) ? { value, from: account } : { from: account }),
-        })
+        let txResponse
+
+        if (isAmbireWC && approvalState === ApprovalState.NOT_APPROVED) {
+          const routerAddress = args[0]
+          const approveData = tokenContract?.interface?.encodeFunctionData('approve', [
+            routerAddress.toString(),
+            MaxUint256,
+          ])
+
+          const swapData = args[2]
+
+          const params = [
+            {
+              to: tokenContract?.address,
+              data: approveData,
+            },
+            {
+              to: routerAddress,
+              data: swapData,
+            },
+          ]
+
+          const wcProvider = library.provider as WalletConnectProvider
+          txResponse = new Promise<TransactionResponse>((resolve, reject) => {
+            wcProvider.connector
+              .sendCustomRequest({
+                method: 'ambire_sendBatchTransaction',
+                params,
+              })
+              .then((res) => {
+                resolve({
+                  hash: res,
+                  wait: (confirmations) => library.waitForTransaction(res, confirmations),
+                } as TransactionResponse)
+              })
+              .catch(reject)
+          })
+        } else {
+          txResponse = contract[methodName](...args, {
+            gasLimit: calculateGasMargin(gasEstimate),
+            gasPrice,
+            ...(value && !isZero(value) ? { value, from: account } : { from: account }),
+          })
+        }
+
+        return txResponse
           .then((response: any) => {
             const inputSymbol = trade.inputAmount.currency.symbol
             const outputSymbol = trade.outputAmount.currency.symbol
@@ -161,7 +216,21 @@ export function useSwapCallback(
       },
       error: null,
     }
-  }, [trade, library, account, chainId, recipient, recipientAddressOrName, swapCalls, gasPrice, t, addTransaction])
+  }, [
+    trade,
+    library,
+    account,
+    chainId,
+    recipient,
+    recipientAddressOrName,
+    swapCalls,
+    gasPrice,
+    t,
+    addTransaction,
+    approvalState,
+    isAmbireWC,
+    tokenContract,
+  ])
 }
 
 /**

@@ -5,7 +5,9 @@ import { useMemo } from 'react'
 import { BIPS_BASE, INITIAL_ALLOWED_SLIPPAGE } from '../config/constants'
 import { getRouterContract } from '../utils'
 import useENS from './ENS/useENS'
+import { ApprovalState, useApproveCallbackFromTrade } from './useApproveCallback'
 import useTransactionDeadline from './useTransactionDeadline'
+import { useAmbireWalletContract } from './useContract'
 
 interface SwapCall {
   contract: Contract
@@ -28,6 +30,9 @@ export function useSwapCallArguments(
   const { address: recipientAddress } = useENS(recipientAddressOrName)
   const recipient = recipientAddressOrName === null ? account : recipientAddress
   const deadline = useTransactionDeadline()
+
+  const ambireWalletContract = useAmbireWalletContract()
+  const [approvalState] = useApproveCallbackFromTrade(trade, allowedSlippage)
 
   return useMemo(() => {
     if (!trade || !recipient || !library || !account || !chainId || !deadline) return []
@@ -59,6 +64,22 @@ export function useSwapCallArguments(
       )
     }
 
-    return swapMethods.map((parameters) => ({ parameters, contract }))
-  }, [account, allowedSlippage, chainId, deadline, library, recipient, trade])
+    return swapMethods.map((parameters) => {
+      if (ambireWalletContract && approvalState === ApprovalState.NOT_APPROVED) {
+        // Using tryCatch as a byproduct to pass swap Calldata but avoid gas + simulation fail if not token is not approved as this transaction will not fail
+        const swapData = contract.interface.encodeFunctionData(parameters.methodName, parameters.args)
+        const swapCall = {
+          parameters: {
+            methodName: 'tryCatch',
+            args: [contract.address, '0', swapData],
+            value: '0',
+          },
+          contract: ambireWalletContract,
+        }
+
+        return swapCall
+      }
+      return { parameters, contract }
+    })
+  }, [account, allowedSlippage, ambireWalletContract, approvalState, chainId, deadline, library, recipient, trade])
 }
